@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS ALLDATA(
   PRIMARY KEY (id),
   FOREIGN KEY (parentId) REFERENCES ALLDATA(id),
   CHECK (id != parentId),
-  CHECK (jsonb_typeof(data -> 'type') = 'string')
+  CHECK ((data ? 'type') AND (jsonb_typeof(data -> 'type') = 'string'))
 );
 
 --
