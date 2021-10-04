@@ -40,7 +40,6 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 --
 -- Create table for all data
 --
-
 CREATE TABLE IF NOT EXISTS ALLDATA(
   data JSONB,
   id UUID GENERATED ALWAYS AS (uuid(data ->> 'id')) STORED,
@@ -68,8 +67,6 @@ CREATE INDEX IF NOT EXISTS alldata_descriptor_ix ON ALLDATA USING GIN(descriptor
 --
 -- Generate data, if the table is empty
 --
-
-
 DO $$
 DECLARE
 BEGIN
