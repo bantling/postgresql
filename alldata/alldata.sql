@@ -1,7 +1,7 @@
 --
 -- Create a recursive function to grab all values from a jsonb document except for booleans and strings that are uuids
 --
-CREATE OR REPLACE FUNCTION jsonb_recurse(jsonValue JSONB)
+CREATE OR REPLACE FUNCTION jsonb_descriptor(jsonValue JSONB)
 RETURNS TEXT AS
 $$
 DECLARE
@@ -24,12 +24,12 @@ BEGIN
   WHEN 'array' THEN
     FOR subValue IN SELECT value FROM jsonb_array_elements(jsonValue)
     LOOP
-      docStr := docStr || jsonb_recurse(subValue) || ' ';
+      docStr := docStr || jsonb_descriptor(subValue) || ' ';
     END LOOP;
   ELSE -- Must be object
     FOR subValue IN SELECT value FROM jsonb_each(jsonValue)
     LOOP
-      docStr := docStr || jsonb_recurse(subValue) || ' ';
+      docStr := docStr || jsonb_descriptor(subValue) || ' ';
     END LOOP;
   END CASE;
     
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS ALLDATA(
   parentId UUID GENERATED ALWAYS AS (uuid(data ->> 'parentId')) STORED,
   descriptor TSVECTOR GENERATED ALWAYS AS (to_tsvector(
     'simple',
-    CASE WHEN data ? 'descriptor' THEN data ->> 'descriptor' ELSE jsonb_recurse(data) END
+    CASE WHEN data ? 'descriptor' THEN data ->> 'descriptor' ELSE jsonb_descriptor(data) END
   )) STORED,
   PRIMARY KEY (id),
   FOREIGN KEY (parentId) REFERENCES ALLDATA(id),
@@ -57,12 +57,12 @@ CREATE TABLE IF NOT EXISTS ALLDATA(
 --
 -- Create jsonb_path_ops index on alldata.data
 --
-CREATE INDEX IF NOT EXISTS alldata_data_ix ON ALLDATA USING GIN(data jsonb_path_ops);
+CREATE INDEX IF NOT EXISTS alldata_ix_data ON ALLDATA USING GIN(data jsonb_path_ops);
 
 --
 -- Create full text search index on alldata.descriptor
 --
-CREATE INDEX IF NOT EXISTS alldata_descriptor_ix ON ALLDATA USING GIN(descriptor);
+CREATE INDEX IF NOT EXISTS alldata_ix_descriptor ON ALLDATA USING GIN(descriptor);
 
 --
 -- Generate data, if the table is empty
