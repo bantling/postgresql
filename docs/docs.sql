@@ -38,31 +38,31 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 --
--- Create table for all data
+-- Create table for all documents
 --
-CREATE TABLE IF NOT EXISTS ALLDATA(
-  data JSONB,
-  id UUID GENERATED ALWAYS AS (uuid(data ->> 'id')) STORED,
-  parentId UUID GENERATED ALWAYS AS (uuid(data ->> 'parentId')) STORED,
+CREATE TABLE IF NOT EXISTS DOCS(
+  doc JSONB,
+  id UUID GENERATED ALWAYS AS (uuid(doc ->> 'id')) STORED,
+  parentId UUID GENERATED ALWAYS AS (uuid(doc ->> 'parentId')) STORED,
   descriptor TSVECTOR GENERATED ALWAYS AS (to_tsvector(
     'simple',
-    CASE WHEN data ? 'descriptor' THEN data ->> 'descriptor' ELSE jsonb_descriptor(data) END
+    CASE WHEN doc ? 'descriptor' THEN doc ->> 'descriptor' ELSE jsonb_descriptor(doc) END
   )) STORED,
   PRIMARY KEY (id),
-  FOREIGN KEY (parentId) REFERENCES ALLDATA(id),
+  FOREIGN KEY (parentId) REFERENCES DOCS(id),
   CHECK (id != parentId),
-  CHECK ((data ? 'type') AND (jsonb_typeof(data -> 'type') = 'string'))
+  CHECK ((doc ? 'type') AND (jsonb_typeof(doc -> 'type') = 'string'))
 );
 
 --
--- Create jsonb_path_ops index on alldata.data
+-- Create jsonb_path_ops index on docs.doc
 --
-CREATE INDEX IF NOT EXISTS alldata_ix_data ON ALLDATA USING GIN(data jsonb_path_ops);
+CREATE INDEX IF NOT EXISTS docs_ix_doc ON DOCS USING GIN(doc jsonb_path_ops);
 
 --
--- Create full text search index on alldata.descriptor
+-- Create full text search index on docs.descriptor
 --
-CREATE INDEX IF NOT EXISTS alldata_ix_descriptor ON ALLDATA USING GIN(descriptor);
+CREATE INDEX IF NOT EXISTS docs_ix_descriptor ON DOCS USING GIN(descriptor);
 
 --
 -- Generate data, if the table is empty
@@ -70,7 +70,7 @@ CREATE INDEX IF NOT EXISTS alldata_ix_descriptor ON ALLDATA USING GIN(descriptor
 DO $$
 DECLARE
 BEGIN
-  IF NOT EXISTS (SELECT FROM alldata) THEN
+  IF NOT EXISTS (SELECT FROM docs) THEN
     WITH firstNames AS (
       SELECT ARRAY[
         'Jane', 'Sarah', 'Christy', 'Deborah', 'Jen',
@@ -93,31 +93,91 @@ BEGIN
         ['347 Glenridge St', 'Athabasca', 'AB', 'CAN', 'T9S 4R9']
       ] addresses
     )
-    INSERT INTO alldata(data)
+    INSERT INTO docs(doc)
     SELECT jsonb_build_object(
       'type', 'Customer',
       'id', gen_random_uuid(),
       'firstName', firstNames[firstNamesIdx],
-      'lastName', lastNames[ lastNamesIdx],
+      'lastName', lastNames[lastNamesIdx],
       'address', jsonb_build_object(
         'line', addresses[addressRow][1],
         'city', addresses[addressRow][2],
         'region', addresses[addressRow][3],
         'country', addresses[addressRow][4],
         'mailCode', addresses[addressRow][5]
-      )
+      ),
+      'descriptor', firstNames[firstNamesIdx] || ' ' ||
+                    lastNames[lastNamesIdx] || ' ' ||
+                    addresses[addressRow][2] || ' ' ||
+                    addresses[addressRow][3]  
     )
     FROM firstNames,
-      lastNames,
-      addresses,
-      ( SELECT ceil(random() * array_length(firstNames, 1)) firstNamesIdx,
-               ceil(random() * array_length(lastNames, 1)) lastNamesIdx,
-               ceil(random() * array_length(addresses, 1)) addressRow
-          FROM firstNames,
-               lastNames,
-               addresses,
-               generate_series(1, 10000)
+         lastNames,
+         addresses,
+         ( SELECT ceil(random() * array_length(firstNames, 1)) firstNamesIdx,
+                  ceil(random() * array_length(lastNames, 1)) lastNamesIdx,
+                  ceil(random() * array_length(addresses, 1)) addressRow
+             FROM firstNames,
+                  lastNames,
+                  addresses,
+                  generate_series(1, 1000000)
       ) t;
   END IF;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Update query planning info
+ANALYZE docs;
+
+-- Time some queries
+\timing
+
+SELECT count(*)
+  FROM docs
+ WHERE doc @> jsonb_build_object('firstName', 'Jane', 'address', jsonb_build_object('city', 'ON'));
+
+SELECT count(*)
+  FROM docs
+ WHERE doc @> jsonb_build_object('firstName', 'Bob', 'address', jsonb_build_object('city', 'ON'));
+
+SELECT count(*)
+  FROM docs
+ WHERE descriptor @@ 'jane & on';
+ 
+SELECT count(*)
+  FROM docs
+ WHERE descriptor @@ 'bob & on';
+
+-- Upsert query example
+
+INSERT INTO docs(doc) VALUES(
+  jsonb_build_object(
+    'id', '12345678-1234-1234-1234-1234567890AB',
+    'type', 'UpsertTest',
+    'foo', 'bar'
+  )
+) ON CONFLICT (id) DO
+UPDATE SET doc = jsonb_build_object(
+  'id', '12345678-1234-1234-1234-1234567890AB',
+  'type', 'UpsertTest',
+  'foo', 'barish'
+);
+
+SELECT doc from docs where descriptor @@ 'upserttest & bar';
+
+INSERT INTO docs(doc) VALUES(
+  jsonb_build_object(
+    'id', '12345678-1234-1234-1234-1234567890AB',
+    'type', 'UpsertTest',
+    'foo', 'bar'
+  )
+) ON CONFLICT (id) DO
+UPDATE SET doc = jsonb_build_object(
+  'id', '12345678-1234-1234-1234-1234567890AB',
+  'type', 'UpsertTest',
+  'foo', 'barish'
+);
+
+SELECT doc from docs where descriptor @@ 'upserttest & barish';
+
+\timing
